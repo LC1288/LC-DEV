@@ -1,61 +1,85 @@
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch";
-import { XMLParser } from "fast-xml-parser";
+const express = require("express");
+const cors = require("cors");
+const { XMLParser } = require("fast-xml-parser");
 
 const app = express();
 app.use(cors());
 
-const USER = process.env.NEXTBUSES_USER; // TravelineAPIxxx
+const USER = process.env.NEXTBUSES_USER;
 const PASS = process.env.NEXTBUSES_PASS;
 
-function siriStopMonitoringXML({ requestorRef, monitoringRef }) {
-  const now = new Date().toISOString();
-  const msgId = String(Date.now());
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Siri version="1.0" xmlns="http://www.siri.org.uk/">
-  <ServiceRequest>
-    <RequestTimestamp>${now}</RequestTimestamp>
-    <RequestorRef>${requestorRef}</RequestorRef>
-    <StopMonitoringRequest version="1.0">
-      <RequestTimestamp>${now}</RequestTimestamp>
-      <MessageIdentifier>${msgId}</MessageIdentifier>
-      <MonitoringRef>${monitoringRef}</MonitoringRef>
-    </StopMonitoringRequest>
-  </ServiceRequest>
-</Siri>`;
-}
+// quick test endpoint so we KNOW the server is reachable
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
 
 app.get("/api/departures", async (req, res) => {
   try {
-    const stop = req.query.stop; // AtcoCode or NaptanCode
+    const stop = req.query.stop;
     if (!stop) return res.status(400).json({ error: "Missing ?stop=" });
 
+    // If you don't have credentials yet, return a clear message (not "Failed to fetch")
     if (!USER || !PASS) {
-      return res.status(500).json({ error: "Missing NEXTBUSES_USER / NEXTBUSES_PASS env vars" });
+      return res.status(501).json({
+        error:
+          "NextBuses credentials not set. Set NEXTBUSES_USER and NEXTBUSES_PASS to enable live departures.",
+      });
     }
 
-    const url = `http://${encodeURIComponent(USER)}:${encodeURIComponent(PASS)}@nextbus.mxdata.co.uk/nextbuses/1.0/1`;
+    const url = `http://${encodeURIComponent(USER)}:${encodeURIComponent(
+      PASS
+    )}@nextbus.mxdata.co.uk/nextbuses/1.0/1`;
 
-    const xml = siriStopMonitoringXML({ requestorRef: USER, monitoringRef: stop });
+    const now = new Date().toISOString();
+    const msgId = String(Date.now());
 
+    const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Siri version="1.0" xmlns="http://www.siri.org.uk/">
+  <ServiceRequest>
+    <RequestTimestamp>${now}</RequestTimestamp>
+    <RequestorRef>${USER}</RequestorRef>
+    <StopMonitoringRequest version="1.0">
+      <RequestTimestamp>${now}</RequestTimestamp>
+      <MessageIdentifier>${msgId}</MessageIdentifier>
+      <MonitoringRef>${stop}</MonitoringRef>
+    </StopMonitoringRequest>
+  </ServiceRequest>
+</Siri>`;
+
+    // Node 24 has fetch built in (no node-fetch needed)
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "text/xml" },
       body: xml,
     });
 
-    if (!r.ok) throw new Error(`NextBuses HTTP ${r.status}`);
-
     const text = await r.text();
+    if (!r.ok) {
+      return res.status(502).json({ error: `NextBuses HTTP ${r.status}`, body: text.slice(0, 500) });
+    }
+
     const parser = new XMLParser({ ignoreAttributes: false });
     const data = parser.parse(text);
-
-    // Return raw parsed JSON for now (we can “shape” it next)
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message || "Unknown error" });
+    res.status(500).json({ error: e?.message || "Unknown error" });
   }
 });
 
-app.listen(3001, () => console.log("API on http://localhost:3001"));
+app.listen(3001, () => console.log("API running on http://localhost:3001"));
+
+app.get("/api/scheduled", (req, res) => {
+  const stop = req.query.stop;
+  if (!stop) return res.status(400).json({ error: "Missing ?stop=" });
+
+  res.json({
+    stop,
+    departures: [
+      { route: "1", destination: "City Centre", time: "10:35" },
+      { route: "1", destination: "City Centre", time: "10:55" },
+      { route: "3", destination: "Bretton", time: "11:05" }
+    ],
+    source: "scheduled"
+  });
+});
+
