@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import "./App.css";
 
 export default function App() {
-  const [stop, setStop] = useState("0590XXXXXXX"); // put a real code later
+  const [stop, setStop] = useState("059000000"); // any placeholder for now
   const [data, setData] = useState(null);
   const [status, setStatus] = useState("idle"); // idle | loading | ok | error
   const [error, setError] = useState("");
@@ -14,8 +14,9 @@ export default function App() {
       setStatus("loading");
       setError("");
 
+      // Use scheduled endpoint (health endpoint won't return departures)
       const res = await fetch(
-        `http://localhost:3001/api/departures?stop=${encodeURIComponent(stop)}`
+        `http://localhost:3001/api/scheduled?stop=${encodeURIComponent(stop)}`
       );
 
       const json = await res.json();
@@ -32,7 +33,6 @@ export default function App() {
     }
   }
 
-  // Auto-load whenever stop changes (and on first render)
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,7 +68,22 @@ export default function App() {
 
       {status === "ok" && (
         <div style={{ marginTop: 16 }}>
-          <h3>Raw response (temporary)</h3>
+          {data?.departures?.length ? (
+            <>
+              <h3>Next buses</h3>
+              <ul>
+                {data.departures.map((d, i) => (
+                  <li key={i}>
+                    <b>{d.route}</b> → {d.destination} at {d.time}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>No departures returned.</p>
+          )}
+
+          <h3 style={{ marginTop: 16 }}>Raw response</h3>
           <pre
             style={{
               whiteSpace: "pre-wrap",
@@ -85,4 +100,7 @@ export default function App() {
     </div>
   );
 }
+
+
+
 
