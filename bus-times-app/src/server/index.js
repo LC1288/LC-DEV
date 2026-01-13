@@ -1,3 +1,4 @@
+/* eslint-disable */
 const express = require("express");
 const cors = require("cors");
 const { XMLParser } = require("fast-xml-parser");
@@ -5,24 +6,41 @@ const { XMLParser } = require("fast-xml-parser");
 const app = express();
 app.use(cors());
 
-const USER = process.env.NEXTBUSES_USER;
-const PASS = process.env.NEXTBUSES_PASS;
-
 // quick test endpoint so we KNOW the server is reachable
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
+// scheduled demo endpoint (works WITHOUT credentials)
+app.get("/api/scheduled", (req, res) => {
+  const stop = req.query.stop;
+  if (!stop) return res.status(400).json({ error: "Missing ?stop=" });
+
+  res.json({
+    stop,
+    departures: [
+      { route: "1", destination: "City Centre", time: "10:35" },
+      { route: "1", destination: "City Centre", time: "10:55" },
+      { route: "3", destination: "Bretton", time: "11:05" }
+    ],
+    source: "scheduled"
+  });
+});
+
+// live departures endpoint (requires credentials)
 app.get("/api/departures", async (req, res) => {
   try {
     const stop = req.query.stop;
     if (!stop) return res.status(400).json({ error: "Missing ?stop=" });
 
-    // If you don't have credentials yet, return a clear message (not "Failed to fetch")
+    const USER = process.env.NEXTBUSES_USER;
+    const PASS = process.env.NEXTBUSES_PASS;
+
+    // If you don't have credentials yet, return a clear message
     if (!USER || !PASS) {
       return res.status(501).json({
         error:
-          "NextBuses credentials not set. Set NEXTBUSES_USER and NEXTBUSES_PASS to enable live departures.",
+          "NextBuses credentials not set. Set NEXTBUSES_USER and NEXTBUSES_PASS to enable live departures."
       });
     }
 
@@ -46,16 +64,19 @@ app.get("/api/departures", async (req, res) => {
   </ServiceRequest>
 </Siri>`;
 
-    // Node 24 has fetch built in (no node-fetch needed)
+    // Node 18+ has fetch built in
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "text/xml" },
-      body: xml,
+      body: xml
     });
 
     const text = await r.text();
     if (!r.ok) {
-      return res.status(502).json({ error: `NextBuses HTTP ${r.status}`, body: text.slice(0, 500) });
+      return res.status(502).json({
+        error: `NextBuses HTTP ${r.status}`,
+        body: text.slice(0, 500)
+      });
     }
 
     const parser = new XMLParser({ ignoreAttributes: false });
@@ -68,18 +89,4 @@ app.get("/api/departures", async (req, res) => {
 
 app.listen(3001, () => console.log("API running on http://localhost:3001"));
 
-app.get("/api/scheduled", (req, res) => {
-  const stop = req.query.stop;
-  if (!stop) return res.status(400).json({ error: "Missing ?stop=" });
-
-  res.json({
-    stop,
-    departures: [
-      { route: "1", destination: "City Centre", time: "10:35" },
-      { route: "1", destination: "City Centre", time: "10:55" },
-      { route: "3", destination: "Bretton", time: "11:05" }
-    ],
-    source: "scheduled"
-  });
-});
 
