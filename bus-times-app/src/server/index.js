@@ -22,20 +22,27 @@ let stopsCache = null;
 
 function loadStops() {
   if (stopsCache) return stopsCache;
+
   const csv = fs.readFileSync(NAPTAN_FILE, "utf8");
   const rows = parse(csv, { columns: true, skip_empty_lines: true });
 
-  // Keep only what we need + ensure it's Peterborough-ish (ATCO starts with 059)
+  // Helper: safely read a value from different possible CSV header names
+  const get = (row, keys) =>
+    keys.map((k) => row[k]).find((v) => v !== undefined && v !== "") ?? "";
+
+  // NOTE: we removed the startsWith("059") filter because your CSV is already Peterborough-only,
+  // and some NaPTAN exports use different header names.
   stopsCache = rows
-    .filter((r) => String(r.AtcoCode || "").startsWith("059"))
     .map((r) => ({
-      atcoCode: r.AtcoCode,
-      commonName: r.CommonName || r.Indicator || "Stop",
-      indicator: r.Indicator || "",
-      localityName: r.LocalityName || "",
-      lat: Number(r.Latitude),
-      lon: Number(r.Longitude),
+      atcoCode: get(r, ["AtcoCode", "ATCOCode", "atcocode", "StopPointRef", "stop_id"]),
+      commonName:
+        get(r, ["CommonName", "common_name", "Name", "DescriptorCommonName"]) || "Stop",
+      indicator: get(r, ["Indicator", "indicator"]) || "",
+      localityName: get(r, ["LocalityName", "locality_name", "Locality"]) || "",
+      lat: Number(get(r, ["Latitude", "lat", "StopLatitude"])),
+      lon: Number(get(r, ["Longitude", "lon", "StopLongitude"])),
     }))
+    .filter((s) => s.atcoCode)
     .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon));
 
   return stopsCache;
@@ -68,15 +75,11 @@ function readGTFS(filename) {
 }
 
 function ensureGtfsLoaded() {
-  // If tables exist, assume loaded
   const has = db
-    .prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='stop_times'"
-    )
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stop_times'")
     .get();
   if (has) return;
 
-  // Basic GTFS tables
   db.exec(`
     CREATE TABLE routes(route_id TEXT, route_short_name TEXT, route_long_name TEXT);
     CREATE TABLE trips(trip_id TEXT, route_id TEXT, service_id TEXT, trip_headsign TEXT);
@@ -88,7 +91,6 @@ function ensureGtfsLoaded() {
     CREATE INDEX idx_trips_trip_id ON trips(trip_id);
   `);
 
-  // Load files (must exist)
   const routes = readGTFS("routes.txt");
   const trips = readGTFS("trips.txt");
   const stopTimes = readGTFS("stop_times.txt");
@@ -123,14 +125,12 @@ function ensureGtfsLoaded() {
   tx();
 }
 
-// Convert HH:MM:SS to seconds (GTFS may exceed 24:00:00)
 function timeToSeconds(t) {
   const [h, m, s] = String(t).split(":").map(Number);
   if (![h, m, s].every(Number.isFinite)) return null;
   return h * 3600 + m * 60 + s;
 }
 
-// Current “service day seconds” (simple version: today only)
 function nowSeconds() {
   const d = new Date();
   return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
@@ -146,7 +146,6 @@ app.get("/api/next", (req, res) => {
     const limit = Math.min(Number(req.query.limit || 10), 25);
     const now = nowSeconds();
 
-    // Pull candidates for this stop, then filter by time in JS (simple & reliable)
     const rows = db
       .prepare(
         `
