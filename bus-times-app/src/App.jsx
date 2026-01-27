@@ -2,105 +2,107 @@ import { useEffect, useState } from "react";
 import "./App.css";
 
 export default function App() {
-  const [stop, setStop] = useState("059000000"); // any placeholder for now
-  const [data, setData] = useState(null);
-  const [status, setStatus] = useState("idle"); // idle | loading | ok | error
+  const [query, setQuery] = useState("Queensgate");
+  const [stops, setStops] = useState([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  async function load() {
-    if (!stop) return;
-
+  async function loadStops(q) {
     try {
-      setStatus("loading");
+      setLoading(true);
       setError("");
 
-      // Use scheduled endpoint (health endpoint won't return departures)
       const res = await fetch(
-        `http://localhost:3001/api/scheduled?stop=${encodeURIComponent(stop)}`
+        `http://localhost:3001/api/stops?q=${encodeURIComponent(q)}`
       );
-
       const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
-      if (!res.ok) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
-      }
-
-      setData(json);
-      setStatus("ok");
+      setStops(json);
     } catch (e) {
-      setStatus("error");
-      setError(e?.message || "Unknown error");
+      setError(e?.message || "Failed to load stops");
+      setStops([]);
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    loadStops(query);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stop]);
+  }, []);
 
   return (
     <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
       <h1>Peterborough bus times</h1>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <label>
-          Stop code (ATCO/NaPTAN):
-          <input
-            value={stop}
-            onChange={(e) => setStop(e.target.value)}
-            style={{ marginLeft: 8, padding: 6, width: 220 }}
-            placeholder="e.g. 0590..."
-          />
-        </label>
-
-        <button onClick={load} style={{ padding: "6px 12px" }}>
-          Refresh
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search a stop (e.g. Queensgate, Station, Bretton...)"
+          style={{ padding: 10, flex: 1 }}
+        />
+        <button onClick={() => loadStops(query)} style={{ padding: "10px 14px" }}>
+          Search
         </button>
       </div>
 
-      {status === "loading" && <p>Loading…</p>}
+      {loading && <p style={{ marginTop: 12 }}>Loading stops…</p>}
 
-      {status === "error" && (
+      {error && (
         <div style={{ marginTop: 12, color: "salmon" }}>
           <b>Error:</b> {error}
         </div>
       )}
 
-      {status === "ok" && (
-        <div style={{ marginTop: 16 }}>
-          {data?.departures?.length ? (
-            <>
-              <h3>Next buses</h3>
-              <ul>
-                {data.departures.map((d, i) => (
-                  <li key={i}>
-                    <b>{d.route}</b> → {d.destination} at {d.time}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <p>No departures returned.</p>
-          )}
+      <div style={{ marginTop: 16 }}>
+        <h3>
+          Results {stops.length ? `(${stops.length})` : ""}{" "}
+          <span style={{ opacity: 0.7, fontSize: 12 }}>
+            (click a stop to copy its ATCO code)
+          </span>
+        </h3>
 
-          <h3 style={{ marginTop: 16 }}>Raw response</h3>
-          <pre
-            style={{
-              whiteSpace: "pre-wrap",
-              background: "#111",
-              padding: 12,
-              borderRadius: 8,
-              overflow: "auto",
-            }}
-          >
-            {JSON.stringify(data, null, 2)}
-          </pre>
+        <div style={{ border: "1px solid #333", borderRadius: 10, overflow: "hidden" }}>
+          {stops.slice(0, 50).map((s) => (
+            <button
+              key={s.atcoCode}
+              onClick={() => {
+                navigator.clipboard?.writeText(s.atcoCode);
+                alert(`Copied ATCO code: ${s.atcoCode}`);
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: 12,
+                border: "none",
+                borderBottom: "1px solid #222",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ fontWeight: 800 }}>
+                {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
+              </div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>
+                {s.localityName} • {s.atcoCode}
+              </div>
+            </button>
+          ))}
+
+          {!loading && !error && stops.length === 0 && (
+            <div style={{ padding: 12, opacity: 0.8 }}>No stops found.</div>
+          )}
         </div>
-      )}
+      </div>
+
+      <div style={{ marginTop: 18, opacity: 0.75, fontSize: 12 }}>
+        ✅ Stops data loaded from your NaPTAN CSV. <br />
+        ⏳ Next step: add timetable data (GTFS) so we can show “next buses” for a stop.
+      </div>
     </div>
   );
 }
-
-
-
-

@@ -9,5 +9,8 @@
     "express": "^4.22.1",
     "fast-xml-parser": "^4.5.3",
     "node-fetch": "^3.0.0"
+  },
+  "scripts": {
+    "start": "node index.js"
   }
 }
