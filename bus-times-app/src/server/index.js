@@ -182,3 +182,13 @@ app.get("/api/next", (req, res) => {
 });
 
 app.listen(3001, () => console.log("API running on http://localhost:3001"));
+
+app.get("/api/debug-naptan", (req, res) => {
+  const csv = fs.readFileSync(NAPTAN_FILE, "utf8");
+  const rows = parse(csv, { columns: true, skip_empty_lines: true });
+  res.json({
+    headers: Object.keys(rows[0] || {}),
+    sampleRow: rows[0] || null,
+    count: rows.length
+  });
+});
