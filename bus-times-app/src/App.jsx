@@ -1,13 +1,20 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./App.css";
+import LiveBusMap from "./LiveBusMap";
 
 export default function App() {
-  const [query, setQuery] = useState("Enter Here");
+  const [query, setQuery] = useState("");
   const [stops, setStops] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function loadStops(q) {
+    if (!q.trim()) {
+      setStops([]);
+      setError("");
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");
@@ -15,6 +22,16 @@ export default function App() {
       const res = await fetch(
         `http://localhost:3001/api/stops?q=${encodeURIComponent(q)}`
       );
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await res.text().catch(() => "");
+        throw new Error(
+          `API returned non-JSON (${res.status}).` +
+            (text ? ` First bytes: ${text.slice(0, 60)}` : "")
+        );
+      }
+
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
@@ -27,81 +44,92 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    loadStops(query);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
-    <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-      <h1>Bus times</h1>
+    <div className="appShell">
+      <div className="appWrap">
+        <header className="header">
+          <h1 className="title">Bus times</h1>
+          <p className="subtitle">
+            Search a stop, copy its ATCO code, and view live buses on the map.
+          </p>
+        </header>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search a stop (e.g. Queensgate, Parnwell, Tesco...)"
-          style={{ padding: 10, flex: 1 }}
-        />
-        <button onClick={() => loadStops(query)} style={{ padding: "10px 14px" }}>
-          Search
-        </button>
-      </div>
-
-      {loading && <p style={{ marginTop: 12 }}>Loading stops…</p>}
-
-      {error && (
-        <div style={{ marginTop: 12, color: "salmon" }}>
-          <b>Error:</b> {error}
-        </div>
-      )}
-
-      <div style={{ marginTop: 16 }}>
-        <h3>
-          Results {stops.length ? `(${stops.length})` : ""}{" "}
-          <span style={{ opacity: 0.7, fontSize: 12 }}>
-            (click a stop to copy its ATCO code)
-          </span>
-        </h3>
-
-        <div style={{ border: "1px solid #333", borderRadius: 10, overflow: "hidden" }}>
-          {stops.slice(0, 50).map((s) => (
-            <button
-              key={s.atcoCode}
-              onClick={() => {
-                navigator.clipboard?.writeText(s.atcoCode);
-                alert(`Copied ATCO code: ${s.atcoCode}`);
+        <section className="card">
+          <div className="searchRow">
+            <input
+              className="input"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setError("");
               }}
-              style={{
-                display: "block",
-                width: "100%",
-                textAlign: "left",
-                padding: 12,
-                border: "none",
-                borderBottom: "1px solid #222",
-                background: "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ fontWeight: 800 }}>
-                {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
-              </div>
-              <div style={{ opacity: 0.75, fontSize: 12 }}>
-                {s.localityName} • {s.atcoCode}
-              </div>
+              placeholder="Search a stop (e.g. Queensgate, Parnwell, Tesco...)"
+            />
+            <button className="btn" onClick={() => loadStops(query)}>
+              Search
             </button>
-          ))}
+          </div>
 
-          {!loading && !error && stops.length === 0 && (
-            <div style={{ padding: 12, opacity: 0.8 }}>No stops found.</div>
+          {loading && (
+            <p className="muted" style={{ marginTop: 12 }}>
+              Loading stops…
+            </p>
           )}
-        </div>
-      </div>
 
-      <div style={{ marginTop: 18, opacity: 0.75, fontSize: 12 }}>
-        ✅ Stops data loaded from your NaPTAN CSV. <br />
-        ⏳ Next step: add timetable data (GTFS) so we can show “next buses” for a stop.
+          {error && (
+            <div className="errorBox">
+              <b>Error:</b> {error}
+            </div>
+          )}
+
+          <div style={{ marginTop: 16 }}>
+            <div className="sectionTitle">
+              Results{" "}
+              <span className="muted">
+                {stops.length ? `(${stops.length})` : ""} • click a stop to copy
+                its ATCO code
+              </span>
+            </div>
+
+            <div className="list">
+              {stops.slice(0, 50).map((s) => (
+                <button
+                  key={s.atcoCode}
+                  className="listItem"
+                  onClick={() => navigator.clipboard?.writeText(s.atcoCode)}
+                >
+                  <div className="stopName">
+                    {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
+                  </div>
+                  <div className="stopMeta">
+                    {s.localityName} • {s.atcoCode}
+                  </div>
+                </button>
+              ))}
+
+              {!loading && !error && stops.length === 0 && (
+                <div className="empty">No stops yet — try a search.</div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="card" style={{ marginTop: 18 }}>
+          <div className="sectionTitle">Live bus map</div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Live locations via BODS feed (updates automatically).
+          </div>
+
+          <div className="mapFrame">
+            <LiveBusMap />
+          </div>
+        </section>
+
+        <footer className="footer">
+          <div>✅ Stops loaded from NaPTAN CSV</div>
+          <div>✅ Live bus locations via BODS (GTFS-RT)</div>
+          <div>⏳ Next: “Due / X min” (needs timetable GTFS or TripUpdates)</div>
+        </footer>
       </div>
     </div>
   );
