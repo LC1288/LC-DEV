@@ -174,3 +174,40 @@ body {
   font-size: 12px;
   line-height: 1.6;
 }
+
+/* ---------- Responsive layout ---------- */
+
+/* Default: desktop / landscape */
+.appWrap {
+  width: min(1100px, 100%);
+}
+
+/* Tablets & phones */
+@media (max-width: 900px) {
+  .appWrap {
+    width: 100%;
+  }
+
+  .leaflet-container {
+    height: 420px !important;
+  }
+}
+
+/* Phones (portrait) */
+@media (max-width: 600px) {
+  .searchRow {
+    grid-template-columns: 1fr;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .leaflet-container {
+    height: 360px !important;
+  }
+
+  .header {
+    text-align: center;
+  }
+}
