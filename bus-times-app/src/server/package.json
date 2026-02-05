@@ -6,6 +6,7 @@
     "better-sqlite3": "^12.6.0",
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",
+    "dotenv": "^17.2.3",
     "express": "^4.22.1",
     "fast-xml-parser": "^5.3.4",
     "node-fetch": "^3.0.0"
