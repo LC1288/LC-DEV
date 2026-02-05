@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import "./App.css";
 
 export default function App() {
-  const [query, setQuery] = useState("Queensgate");
+  const [query, setQuery] = useState("Enter Here");
   const [stops, setStops] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,13 +34,13 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-      <h1>Peterborough bus times</h1>
+      <h1>Bus times</h1>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search a stop (e.g. Queensgate, Station, Bretton...)"
+          placeholder="Search a stop (e.g. Queensgate, Parnwell, Tesco...)"
           style={{ padding: 10, flex: 1 }}
         />
         <button onClick={() => loadStops(query)} style={{ padding: "10px 14px" }}>

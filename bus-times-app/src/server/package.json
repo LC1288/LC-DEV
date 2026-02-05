@@ -7,7 +7,7 @@
     "cors": "^2.8.5",
     "csv-parse": "^6.1.0",
     "express": "^4.22.1",
-    "fast-xml-parser": "^4.5.3",
+    "fast-xml-parser": "^5.3.4",
     "node-fetch": "^3.0.0"
   },
   "scripts": {
