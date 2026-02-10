@@ -1,12 +1,14 @@
 import { useState } from "react";
 import "./App.css";
 import LiveBusMap from "./LiveBusMap";
+import StopLedBoard from "./StopLedBoard";
 
 export default function App() {
   const [query, setQuery] = useState("");
   const [stops, setStops] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedStop, setSelectedStop] = useState(null);
 
   async function loadStops(q) {
     if (!q.trim()) {
@@ -27,8 +29,8 @@ export default function App() {
       if (!contentType.includes("application/json")) {
         const text = await res.text().catch(() => "");
         throw new Error(
-          `API returned non-JSON (${res.status}).` +
-            (text ? ` First bytes: ${text.slice(0, 60)}` : "")
+          `Stops API returned non-JSON (${res.status}).` +
+            (text ? ` First bytes: ${text.slice(0, 80)}` : "")
         );
       }
 
@@ -36,6 +38,12 @@ export default function App() {
       if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
       setStops(json);
+
+      // Keep selection only if still present
+      if (selectedStop) {
+        const stillThere = json.find((s) => s.atcoCode === selectedStop.atcoCode);
+        if (!stillThere) setSelectedStop(null);
+      }
     } catch (e) {
       setError(e?.message || "Failed to load stops");
       setStops([]);
@@ -50,7 +58,7 @@ export default function App() {
         <header className="header">
           <h1 className="title">Bus times</h1>
           <p className="subtitle">
-            Search a stop, copy its ATCO code, and view live buses on the map.
+            Search a stop, select it, and see its info + live buses.
           </p>
         </header>
 
@@ -64,6 +72,9 @@ export default function App() {
                 setError("");
               }}
               placeholder="Search a stop (e.g. Queensgate, Parnwell, Tesco...)"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") loadStops(query);
+              }}
             />
             <button className="btn" onClick={() => loadStops(query)}>
               Search
@@ -86,31 +97,42 @@ export default function App() {
             <div className="sectionTitle">
               Results{" "}
               <span className="muted">
-                {stops.length ? `(${stops.length})` : ""} • click a stop to copy
-                its ATCO code
+                {stops.length ? `(${stops.length})` : ""} • click a stop to select
               </span>
             </div>
 
             <div className="list">
-              {stops.slice(0, 50).map((s) => (
-                <button
-                  key={s.atcoCode}
-                  className="listItem"
-                  onClick={() => navigator.clipboard?.writeText(s.atcoCode)}
-                >
-                  <div className="stopName">
-                    {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
-                  </div>
-                  <div className="stopMeta">
-                    {s.localityName} • {s.atcoCode}
-                  </div>
-                </button>
-              ))}
+              {stops.slice(0, 50).map((s) => {
+                const isSelected = selectedStop?.atcoCode === s.atcoCode;
+                return (
+                  <button
+                    key={s.atcoCode}
+                    className="listItem"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(s.atcoCode);
+                      setSelectedStop(s);
+                    }}
+                    style={{
+                      background: isSelected ? "rgba(255,255,255,0.08)" : "transparent",
+                    }}
+                  >
+                    <div className="stopName">
+                      {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
+                    </div>
+                    <div className="stopMeta">
+                      {s.localityName} • {s.atcoCode}
+                      {isSelected ? " • selected" : ""}
+                    </div>
+                  </button>
+                );
+              })}
 
               {!loading && !error && stops.length === 0 && (
                 <div className="empty">No stops yet — try a search.</div>
               )}
             </div>
+
+            {selectedStop ? <StopLedBoard stop={selectedStop} /> : null}
           </div>
         </section>
 
@@ -128,7 +150,7 @@ export default function App() {
         <footer className="footer">
           <div>✅ Stops loaded from NaPTAN CSV</div>
           <div>✅ Live bus locations via BODS (GTFS-RT)</div>
-          <div>⏳ Next: “Due / X min” (needs timetable GTFS or TripUpdates)</div>
+          <div>🟧 LED board shows stop info (and will show “Due / Xm” once /api/next is implemented)</div>
         </footer>
       </div>
     </div>

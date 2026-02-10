@@ -1,0 +1,96 @@
+.ledWrap {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.ledTop {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ledTitle {
+  font-weight: 900;
+  letter-spacing: 0.3px;
+}
+
+.ledSub {
+  margin-top: 2px;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+/* LED board */
+.ledPanel {
+  background: #050505;
+  color: #ffb020; /* amber */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  padding: 12px;
+}
+
+.ledHeader,
+.ledRow {
+  display: grid;
+  grid-template-columns: 80px 1fr 100px;
+  gap: 10px;
+  align-items: center;
+}
+
+.ledHeader {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 176, 32, 0.25);
+  color: rgba(255, 176, 32, 0.85);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.ledRow {
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(255, 176, 32, 0.18);
+}
+
+.ledRow:last-child {
+  border-bottom: none;
+}
+
+.line {
+  font-weight: 900;
+}
+
+.dest {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.due {
+  font-weight: 900;
+}
+
+.right {
+  text-align: right;
+}
+
+.ledMsg {
+  padding: 12px 0;
+  opacity: 0.9;
+  line-height: 1.4;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.ledMsg.error {
+  color: #ff6b6b;
+}
+
+.ledFoot {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  opacity: 0.75;
+  letter-spacing: 0.2px;
+}
