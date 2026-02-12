@@ -13,205 +13,256 @@ try {
   require("dotenv").config();
 } catch (_) {}
 
+const PORT = process.env.PORT || 3001;
 const BODS_API_KEY = process.env.BODS_API_KEY;
 
-// Peterborough-ish bbox: south,north,west,east
-const DEFAULT_BBOX = "52.50,52.65,-0.40,-0.10";
+// ✅ Your NaPTAN file (as requested)
+const STOPS_FILE = path.join(__dirname, "data", "naptan_peterborough.csv");
 
-// Paths
-const DATA_DIR = path.join(__dirname, "data");
-const NAPTAN_FILE = path.join(DATA_DIR, "naptan_peterborough.csv");
+// ✅ Peterborough bbox (south,north,west,east)
+const PETERBOROUGH_BBOX = "52.50,52.70,-0.40,-0.10";
 
-// If you're on Node < 18, uncomment and run: npm i node-fetch
-// const fetch = (...args) =>
-//   import("node-fetch").then(({ default: fetch }) => fetch(...args));
+// ✅ Limit buses shown on map
+const MAX_BUSES = 40;
 
-/** --------- Load NaPTAN once and cache it --------- */
-let STOPS_CACHE = null;
+// Sort buses closest to centre first (Queensgate-ish)
+const CENTRE_LAT = 52.5746;
+const CENTRE_LON = -0.2417;
 
-function loadStopsFromCsv() {
-  const raw = fs.readFileSync(NAPTAN_FILE, "utf8");
-  const records = parse(raw, {
+/* =============================
+   STOPS CACHE
+============================= */
+let STOP_CACHE = null;
+
+function pick(obj, keys) {
+  for (const k of keys) {
+    if (obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  return "";
+}
+
+function loadStops() {
+  if (!fs.existsSync(STOPS_FILE)) {
+    throw new Error(
+      `Missing stops file at: ${STOPS_FILE}\nPut naptan_peterborough.csv in src/server/data/.`
+    );
+  }
+
+  const raw = fs.readFileSync(STOPS_FILE, "utf8");
+  const rows = parse(raw, {
     columns: true,
     skip_empty_lines: true,
     bom: true,
+    relax_column_count: true,
+    trim: true,
   });
 
-  return records
-    .map((r) => {
-      const atcoCode = r.ATCOCode || r.atcoCode || r.AtcoCode || r.ATCOCODE;
-      if (!atcoCode) return null;
+  const stops = [];
+  const byAtco = new Map();
 
-      return {
-        atcoCode: String(atcoCode).trim(),
-        commonName: (r.CommonName || r.commonName || r.COMMONNAME || "Unknown").trim(),
-        indicator: (r.Indicator || r.indicator || "").trim(),
-        localityName: (
-          r.LocalityName ||
-          r.localityName ||
-          r.NptgLocalityName ||
-          r.NPTGLocalityName ||
-          ""
-        ).trim(),
-        // optional coords if your CSV has them
-        lat:
-          r.Latitude ||
-          r.latitude ||
-          r.Lat ||
-          r.lat ||
-          r.StopPointLat ||
-          null,
-        lon:
-          r.Longitude ||
-          r.longitude ||
-          r.Lon ||
-          r.lon ||
-          r.StopPointLon ||
-          null,
-      };
-    })
-    .filter(Boolean);
+  for (const r of rows) {
+    const atcoCode = String(
+      pick(r, ["ATCOCode", "AtcoCode", "atcoCode", "StopPointRef"])
+    ).trim();
+    if (!atcoCode) continue;
+
+    const commonName = String(
+      pick(r, ["CommonName", "commonName", "StopName", "DescriptorCommonName"])
+    ).trim();
+
+    const indicator = String(
+      pick(r, ["Indicator", "indicator", "StopIndicator", "DescriptorIndicator"])
+    ).trim();
+
+    const localityName = String(
+      pick(r, ["LocalityName", "localityName", "NptgLocalityName", "Locality"])
+    ).trim();
+
+    const latStr = pick(r, ["Latitude", "latitude", "Lat", "lat"]);
+    const lonStr = pick(r, ["Longitude", "longitude", "Lon", "lon", "Lng", "lng"]);
+
+    const lat = Number(latStr);
+    const lon = Number(lonStr);
+
+    const stop = {
+      atcoCode,
+      commonName: commonName || atcoCode,
+      indicator,
+      localityName,
+      lat: Number.isFinite(lat) ? lat : null,
+      lon: Number.isFinite(lon) ? lon : null,
+    };
+
+    stops.push(stop);
+    byAtco.set(atcoCode, stop);
+  }
+
+  return { stops, byAtco };
 }
 
-function getStops() {
-  if (!STOPS_CACHE) STOPS_CACHE = loadStopsFromCsv();
-  return STOPS_CACHE;
+function getStopCache() {
+  if (!STOP_CACHE) STOP_CACHE = loadStops();
+  return STOP_CACHE;
 }
 
-/** --------- Health --------- */
+/* =============================
+   HELPERS
+============================= */
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function dueTextFromMins(mins) {
+  if (!Number.isFinite(mins)) return "—";
+  if (mins <= 0) return "DUE";
+  return `${mins}m`;
+}
+
+function safeNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* =============================
+   BODS GTFS-RT FEED
+============================= */
+async function fetchGtfsRtFeed() {
+  if (!BODS_API_KEY) throw new Error("Missing BODS_API_KEY in src/server/.env");
+
+  const url =
+    `https://data.bus-data.dft.gov.uk/api/v1/gtfsrtdatafeed/` +
+    `?boundingBox=${encodeURIComponent(PETERBOROUGH_BBOX)}` +
+    `&api_key=${encodeURIComponent(BODS_API_KEY)}`;
+
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(
+      `BODS request failed: ${resp.status} ${resp.statusText} :: ${txt.slice(
+        0,
+        200
+      )}`
+    );
+  }
+
+  const ab = await resp.arrayBuffer();
+  return GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(
+    new Uint8Array(ab)
+  );
+}
+
+/* =============================
+   ROUTES
+============================= */
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
 /**
- * --------- Ranked Stops Search ---------
- * This boosts Peterborough + Queensgate so villages like Nassington don't dominate results.
+ * ✅ Debug: stops file loads
+ */
+app.get("/api/debug/stops-health", (req, res) => {
+  try {
+    const { stops } = getStopCache();
+    res.json({
+      ok: true,
+      file: STOPS_FILE,
+      count: stops.length,
+      sample: stops.slice(0, 3),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e), file: STOPS_FILE });
+  }
+});
+
+/**
+ * ✅ Debug: count TripUpdates / StopTimeUpdates in the RT feed
+ */
+app.get("/api/debug/tu-count", async (req, res) => {
+  try {
+    const feed = await fetchGtfsRtFeed();
+    let tripUpdates = 0;
+    let stopTimeUpdates = 0;
+
+    for (const e of feed.entity) {
+      if (e.tripUpdate) {
+        tripUpdates++;
+        stopTimeUpdates += e.tripUpdate.stopTimeUpdate?.length || 0;
+      }
+    }
+
+    res.json({ ok: true, tripUpdates, stopTimeUpdates });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+/**
+ * ✅ Stops search
+ * GET /api/stops?q=queensgate
  */
 app.get("/api/stops", (req, res) => {
   try {
     const q = (req.query.q || "").toString().trim().toLowerCase();
     if (!q) return res.json([]);
 
-    const stops = getStops();
+    const { stops } = getStopCache();
 
-    function scoreStop(s) {
+    function score(s) {
       const name = (s.commonName || "").toLowerCase();
       const loc = (s.localityName || "").toLowerCase();
+      const ind = (s.indicator || "").toLowerCase();
       const atco = (s.atcoCode || "").toLowerCase();
 
-      // Only include if it matches somewhere
-      const matches =
-        name.includes(q) || loc.includes(q) || atco.includes(q) || (s.indicator || "").toLowerCase().includes(q);
-      if (!matches) return 0;
+      const hit =
+        name.includes(q) || loc.includes(q) || ind.includes(q) || atco.includes(q);
+      if (!hit) return 0;
 
-      let score = 0;
+      let sc = 1;
+      if (name === q) sc += 100;
+      if (name.startsWith(q)) sc += 50;
+      if (loc.includes("peterborough")) sc += 20;
 
-      // Name matching (strong)
-      if (name === q) score += 1000;
-      if (name.startsWith(q)) score += 500;
-      if (name.includes(q)) score += 250;
+      if (q.includes("queensgate") && name.includes("queensgate")) sc += 200;
+      if (q === "queens" && name.includes("queensgate")) sc += 100;
 
-      // Locality boost (Peterborough to top)
-      if (loc.includes("peterborough")) score += 250;
-
-      // If user types "queensgate", push queensgate hard
-      if (q.includes("queensgate") && name.includes("queensgate")) score += 800;
-
-      // If user types "queens", still favour queensgate if present
-      if (q === "queens" && name.includes("queensgate")) score += 400;
-
-      // Indicator match (small)
-      if ((s.indicator || "").toLowerCase().includes(q)) score += 80;
-
-      // ATCO match (small)
-      if (atco.includes(q)) score += 60;
-
-      return score;
+      return sc;
     }
 
     const results = stops
-      .map((s) => ({ s, score: scoreStop(s) }))
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 200)
-      .map((x) => ({
-        atcoCode: x.s.atcoCode,
-        commonName: x.s.commonName,
-        indicator: x.s.indicator,
-        localityName: x.s.localityName,
+      .map((s) => ({ s, sc: score(s) }))
+      .filter((x) => x.sc > 0)
+      .sort((a, b) => b.sc - a.sc)
+      .slice(0, 120)
+      .map(({ s }) => ({
+        atcoCode: s.atcoCode,
+        commonName: s.commonName,
+        indicator: s.indicator,
+        localityName: s.localityName,
       }));
 
     res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
-  }
-});
-
-/** --------- Stop info (LED board header) --------- */
-app.get("/api/stop-info", (req, res) => {
-  try {
-    const atco = (req.query.atco || "").toString().trim();
-    if (!atco) return res.status(400).json({ error: "Missing atco" });
-
-    const stops = getStops();
-    const s = stops.find((x) => x.atcoCode === atco);
-
-    if (!s) return res.status(404).json({ error: "Stop not found" });
-
-    res.json({
-      atcoCode: s.atcoCode,
-      commonName: s.commonName,
-      indicator: s.indicator,
-      localityName: s.localityName,
-      lat: s.lat,
-      lon: s.lon,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
+  } catch (e) {
+    res.status(500).json({ error: "Stops API failed", details: e.message || String(e) });
   }
 });
 
 /**
- * --------- Next departures (LED rows) ---------
- * Placeholder until you add timetable GTFS or TripUpdates.
- * MUST return JSON so the LED board doesn't break.
+ * ✅ Live buses for map (limited)
+ * GET /api/live-buses
  */
-app.get("/api/next", (req, res) => {
-  res.json([]);
-});
-
-/** --------- Live buses (GTFS-RT VehiclePositions) --------- */
 app.get("/api/live-buses", async (req, res) => {
   try {
-    if (!BODS_API_KEY) {
-      return res.status(500).json({
-        ok: false,
-        error: "Missing BODS_API_KEY. Put it in src/server/.env",
-      });
-    }
-
-    const bbox = (req.query.bbox || DEFAULT_BBOX).toString();
-    const [minLat, maxLat, minLon, maxLon] = bbox.split(",").map(Number);
-
-    const url =
-      `https://data.bus-data.dft.gov.uk/api/v1/gtfsrtdatafeed/` +
-      `?boundingBox=${encodeURIComponent(bbox)}` +
-      `&api_key=${encodeURIComponent(BODS_API_KEY)}`;
-
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      return res.status(resp.status).json({
-        ok: false,
-        error: `BODS request failed: ${resp.status} ${resp.statusText}`,
-        body: text.slice(0, 300),
-      });
-    }
-
-    const ab = await resp.arrayBuffer();
-    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(
-      new Uint8Array(ab)
-    );
+    const feed = await fetchGtfsRtFeed();
 
     const buses = [];
 
@@ -219,71 +270,149 @@ app.get("/api/live-buses", async (req, res) => {
       const v = entity.vehicle;
       if (!v || !v.position) continue;
 
-      const { latitude, longitude, bearing, speed } = v.position;
-      if (typeof latitude !== "number" || typeof longitude !== "number") continue;
+      const lat = v.position.latitude;
+      const lon = v.position.longitude;
+      if (typeof lat !== "number" || typeof lon !== "number") continue;
 
-      // Enforce bbox locally (prevents spam)
-      if (
-        Number.isFinite(minLat) &&
-        Number.isFinite(maxLat) &&
-        Number.isFinite(minLon) &&
-        Number.isFinite(maxLon)
-      ) {
-        if (
-          latitude < minLat ||
-          latitude > maxLat ||
-          longitude < minLon ||
-          longitude > maxLon
-        ) {
-          continue;
-        }
-      }
+      const d = distanceMeters(lat, lon, CENTRE_LAT, CENTRE_LON);
 
       buses.push({
         vehicleId: v.vehicle?.id || entity.id || null,
-        lat: latitude,
-        lon: longitude,
-        bearing: typeof bearing === "number" ? bearing : null,
-        speed: typeof speed === "number" ? speed : null,
+        lat,
+        lon,
+        bearing: typeof v.position.bearing === "number" ? v.position.bearing : null,
+        speed: typeof v.position.speed === "number" ? v.position.speed : null,
         timestamp: v.timestamp ? Number(v.timestamp) : null,
         routeId: v.trip?.routeId || null,
         tripId: v.trip?.tripId || null,
+        _distance: d,
       });
     }
 
-    // Hard limit so UI stays fast
-    const limited = buses.slice(0, 800);
+    buses.sort((a, b) => a._distance - b._distance);
+    const limited = buses.slice(0, MAX_BUSES).map(({ _distance, ...rest }) => rest);
 
-    res.json({ ok: true, bbox, count: limited.length, buses: limited });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message || String(err) });
+    res.json({
+      ok: true,
+      bbox: PETERBOROUGH_BBOX,
+      count: limited.length,
+      buses: limited,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 });
 
 /**
- * --------- Debug: prove Queensgate exists in your CSV ---------
- * Visit: http://localhost:3001/api/debug/find?q=queensgate
+ * ✅ LED board live times
+ * GET /api/next?atco=XXXX
+ *
+ * 1) TripUpdates (real ETAs if present)
+ * 2) Fallback estimate using VehiclePositions + distance/speed
  */
-app.get("/api/debug/find", (req, res) => {
+app.get("/api/next", async (req, res) => {
   try {
-    const q = (req.query.q || "").toString().toLowerCase().trim();
-    const stops = getStops();
-    const hits = stops
-      .filter((s) =>
-        `${s.commonName} ${s.localityName} ${s.atcoCode}`.toLowerCase().includes(q)
-      )
-      .slice(0, 25)
-      .map((s) => ({
-        atcoCode: s.atcoCode,
-        commonName: s.commonName,
-        indicator: s.indicator,
-        localityName: s.localityName,
-      }));
-    res.json(hits);
-  } catch (err) {
-    res.status(500).json({ error: err.message || String(err) });
+    const atco = (req.query.atco || "").toString().trim();
+    if (!atco) return res.status(400).json({ error: "Missing atco" });
+
+    const feed = await fetchGtfsRtFeed();
+    const { byAtco } = getStopCache();
+    const nowMs = Date.now();
+
+    // ------------------ 1) TripUpdates ------------------
+    const rows = [];
+
+    for (const entity of feed.entity) {
+      const tu = entity.tripUpdate;
+      if (!tu || !tu.stopTimeUpdate || tu.stopTimeUpdate.length === 0) continue;
+
+      const lastStu = tu.stopTimeUpdate[tu.stopTimeUpdate.length - 1];
+      const lastStopId = lastStu?.stopId;
+
+      const destStop = lastStopId ? byAtco.get(lastStopId) : null;
+      const destination =
+        destStop?.commonName || destStop?.localityName || lastStopId || "—";
+
+      for (const stu of tu.stopTimeUpdate) {
+        if (stu.stopId !== atco) continue;
+
+        const rawT = stu.arrival?.time || stu.departure?.time;
+        if (!rawT) continue;
+
+        // ✅ FIX: protobuf Long -> number conversion
+        const sec =
+          typeof rawT === "number"
+            ? rawT
+            : rawT?.toNumber
+            ? rawT.toNumber()
+            : Number(rawT);
+
+        if (!Number.isFinite(sec)) continue;
+
+        const mins = Math.round((sec * 1000 - nowMs) / 60000);
+
+        rows.push({
+          line: tu.trip?.routeId || "—",
+          destination,
+          dueText: dueTextFromMins(mins),
+          _mins: mins,
+        });
+      }
+    }
+
+    if (rows.length > 0) {
+      rows.sort((a, b) => (a._mins ?? 9999) - (b._mins ?? 9999));
+      return res.json(rows.slice(0, 8).map(({ _mins, ...r }) => r));
+    }
+
+    // ------------------ 2) Fallback estimate ------------------
+    const stop = byAtco.get(atco);
+    if (!stop || !Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) {
+      return res.json([]);
+    }
+
+    const est = [];
+
+    for (const entity of feed.entity) {
+      const v = entity.vehicle;
+      if (!v || !v.position) continue;
+
+      const lat = v.position.latitude;
+      const lon = v.position.longitude;
+      if (typeof lat !== "number" || typeof lon !== "number") continue;
+
+      const d = distanceMeters(lat, lon, stop.lat, stop.lon);
+      if (d > 2000) continue;
+
+      const speed = safeNum(v.position.speed) ?? 7;
+      const mins = Math.round(d / speed / 60);
+
+      est.push({
+        line: v.trip?.routeId || "—",
+        destination: "—",
+        dueText: dueTextFromMins(mins),
+        _mins: mins,
+      });
+    }
+
+    est.sort((a, b) => (a._mins ?? 9999) - (b._mins ?? 9999));
+    res.json(est.slice(0, 8).map(({ _mins, ...r }) => r));
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
   }
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`API running on http://localhost:${PORT}`));
+// ✅ Always JSON for unknown /api routes (prevents HTML breaking fetch)
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Not found", path: req.originalUrl });
+});
+
+app.listen(PORT, () => {
+  console.log(`API running on http://localhost:${PORT}`);
+  console.log(`Stops file: ${STOPS_FILE}`);
+  console.log(`Bbox: ${PETERBOROUGH_BBOX}`);
+  console.log(`Live bus limit: ${MAX_BUSES}`);
+});
+
+
+
