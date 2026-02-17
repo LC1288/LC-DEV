@@ -11,20 +11,13 @@ export default function App() {
   const [selectedStop, setSelectedStop] = useState(null);
   const [departures, setDepartures] = useState([]);
 
-  // ===============================
-  // Load departures for selected stop
-  // ===============================
   async function loadNext(atco) {
     try {
       const res = await fetch(
         `http://localhost:3001/api/next?atco=${encodeURIComponent(atco)}`
       );
-
       const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
       setDepartures(Array.isArray(json) ? json : []);
     } catch (err) {
@@ -33,7 +26,6 @@ export default function App() {
     }
   }
 
-  // Poll departures every 15s
   useEffect(() => {
     if (!selectedStop?.atcoCode) {
       setDepartures([]);
@@ -41,17 +33,10 @@ export default function App() {
     }
 
     loadNext(selectedStop.atcoCode);
-
-    const interval = setInterval(() => {
-      loadNext(selectedStop.atcoCode);
-    }, 15000);
-
-    return () => clearInterval(interval);
+    const t = setInterval(() => loadNext(selectedStop.atcoCode), 15000);
+    return () => clearInterval(t);
   }, [selectedStop]);
 
-  // ===============================
-  // Load stops from API
-  // ===============================
   async function loadStops(q) {
     if (!q.trim()) {
       setStops([]);
@@ -62,17 +47,11 @@ export default function App() {
     try {
       setLoading(true);
       setError("");
-
       const res = await fetch(
         `http://localhost:3001/api/stops?q=${encodeURIComponent(q)}`
       );
-
       const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
       setStops(Array.isArray(json) ? json : []);
     } catch (e) {
       setError(e?.message || "Failed to load stops");
@@ -82,9 +61,6 @@ export default function App() {
     }
   }
 
-  // ===============================
-  // UI
-  // ===============================
   return (
     <div className="appShell">
       <div className="appWrap">
@@ -102,15 +78,9 @@ export default function App() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search a stop (e.g. Queensgate...)"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") loadStops(query);
-              }}
+              onKeyDown={(e) => e.key === "Enter" && loadStops(query)}
             />
-            <button
-              className="btn"
-              onClick={() => loadStops(query)}
-              disabled={loading}
-            >
+            <button className="btn" onClick={() => loadStops(query)} disabled={loading}>
               {loading ? "Loading…" : "Search"}
             </button>
           </div>
@@ -127,38 +97,50 @@ export default function App() {
             </div>
           )}
 
-          <div className="list">
-            {stops.slice(0, 50).map((s) => (
-              <button
-                key={s.atcoCode}
-                className="listItem"
-                onClick={() => setSelectedStop(s)}
-              >
-                <div className="stopName">
-                  {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
-                </div>
-                <div className="stopMeta">
-                  {s.localityName} • {s.atcoCode}
-                </div>
-              </button>
-            ))}
+          <div style={{ marginTop: 16 }}>
+            <div className="sectionTitle">Results</div>
 
-            {!loading && !error && stops.length === 0 && (
-              <div className="muted" style={{ padding: 12 }}>
-                No stops yet — try a search.
-              </div>
+            <div className="list">
+              {stops.slice(0, 50).map((s) => (
+                <button
+                  key={s.atcoCode}
+                  className="listItem"
+                  onClick={() => setSelectedStop(s)}
+                  style={{
+                    background:
+                      selectedStop?.atcoCode === s.atcoCode
+                        ? "rgba(255,255,255,0.08)"
+                        : "transparent",
+                  }}
+                >
+                  <div className="stopName">
+                    {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
+                  </div>
+                  <div className="stopMeta">
+                    {s.localityName} • {s.atcoCode}
+                  </div>
+                </button>
+              ))}
+
+              {!loading && !error && stops.length === 0 && (
+                <div className="empty">No stops yet — try a search.</div>
+              )}
+            </div>
+
+            {selectedStop && (
+              <StopLedBoard stop={selectedStop} departures={departures} />
             )}
           </div>
-
-          {selectedStop && (
-            <StopLedBoard stop={selectedStop} departures={departures} />
-          )}
         </section>
 
         <section className="card" style={{ marginTop: 18 }}>
           <div className="sectionTitle">Live bus map</div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            Live locations via BODS feed (Peterborough bbox + limit).
+          </div>
+
           <div className="mapFrame">
-            <LiveBusMap />
+            <LiveBusMap limit={80} />
           </div>
         </section>
       </div>

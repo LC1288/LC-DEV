@@ -1,6 +1,8 @@
 import "./StopLedBoard.css";
 
 export default function StopLedBoard({ stop, departures }) {
+  const rows = Array.isArray(departures) ? departures : [];
+
   return (
     <div className="ledCard" style={{ marginTop: 14 }}>
       <div className="ledHeader">
@@ -17,20 +19,27 @@ export default function StopLedBoard({ stop, departures }) {
           <div style={{ textAlign: "right" }}>DUE</div>
         </div>
 
-        {(departures || []).length === 0 ? (
+        {rows.length === 0 ? (
           <div className="ledEmpty">
             NO LIVE/SCHEDULED DEPARTURES YET.
             <br />
-            (Add timetable GTFS or TripUpdates to show “DUE / Xm”.)
+            (To show exact destinations, you need GTFS static trips/headsigns.)
           </div>
         ) : (
-          departures.slice(0, 6).map((d, i) => (
-            <div className="ledRow" key={`${d.line}-${d.destination}-${d.dueText}-${i}`}>
-              <div className="ledLine">{d.line || "—"}</div>
-              <div className="ledDest">{d.destination || "—"}</div>
-              <div className="ledDue">{d.dueText || "—"}</div>
-            </div>
-          ))
+          rows.slice(0, 6).map((d, i) => {
+            const safeDue =
+              typeof d.dueText === "string" && d.dueText.includes("NaN")
+                ? "—"
+                : (d.dueText || "—");
+
+            return (
+              <div className="ledRow" key={`${d.line}-${d.destination}-${safeDue}-${i}`}>
+                <div className="ledLine">{d.line || "—"}</div>
+                <div className="ledDest">{d.destination || "—"}</div>
+                <div className="ledDue">{safeDue}</div>
+              </div>
+            );
+          })
         )}
       </div>
 
