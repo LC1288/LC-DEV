@@ -3,53 +3,55 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Fix default marker icons in Vite
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
+// Fix marker icons
+import icon2x from "leaflet/dist/images/marker-icon-2x.png";
+import icon from "leaflet/dist/images/marker-icon.png";
+import shadow from "leaflet/dist/images/marker-shadow.png";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
+  iconRetinaUrl: icon2x,
+  iconUrl: icon,
+  shadowUrl: shadow,
 });
 
-// Peterborough bbox + center
-const DEFAULT_BBOX = "52.50,52.65,-0.40,-0.10";
+// HARD LOCK Peterborough center
 const CENTER = [52.5726, -0.2439];
 
-export default function LiveBusMap({ limit = 80 }) {
+// HARD LOCK bbox
+const BBOX = "52.50,52.65,-0.40,-0.10";
+
+export default function LiveBusMap() {
   const [buses, setBuses] = useState([]);
-  const [err, setErr] = useState("");
+  const [error, setError] = useState("");
 
   const url = useMemo(() => {
-    return `http://localhost:3001/api/live-buses?bbox=${encodeURIComponent(
-      DEFAULT_BBOX
-    )}&limit=${encodeURIComponent(limit)}`;
-  }, [limit]);
+    return `http://localhost:3001/api/live-buses?bbox=${BBOX}&limit=80`;
+  }, []);
 
   useEffect(() => {
     let alive = true;
 
-    async function tick() {
+    async function load() {
       try {
         const res = await fetch(url);
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
         if (!alive) return;
-        setBuses(Array.isArray(json.buses) ? json.buses : []);
-        setErr("");
-      } catch (e) {
+
+        setBuses(json.buses || []);
+        setError("");
+      } catch {
         if (!alive) return;
-        setErr(e?.message || "Failed to load live buses");
+        setError("Failed to fetch");
         setBuses([]);
       }
     }
 
-    tick();
-    const t = setInterval(tick, 15000);
+    load();
+
+    const t = setInterval(load, 15000);
+
     return () => {
       alive = false;
       clearInterval(t);
@@ -57,39 +59,37 @@ export default function LiveBusMap({ limit = 80 }) {
   }, [url]);
 
   return (
-    <div>
-      <div style={{ marginTop: 10, marginBottom: 8, opacity: 0.85 }}>
-        Live buses: {buses.length} {err ? `• ${err}` : ""}
+    <>
+      <div style={{ marginBottom: 8 }}>
+        Live buses: {buses.length} {error && `• ${error}`}
       </div>
 
       <MapContainer
         center={CENTER}
-        zoom={12}
-        style={{ height: 420, width: "100%", borderRadius: 14, overflow: "hidden" }}
+        zoom={13}
+        scrollWheelZoom={true}
+        zoomControl={true}
+        dragging={true}
+        doubleClickZoom={true}
+        style={{
+          height: "420px",
+          width: "100%",
+          borderRadius: "12px",
+        }}
       >
         <TileLayer
-          attribution='&copy; OpenStreetMap contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {buses.map((b) => (
-          <Marker key={b.vehicleId || `${b.lat},${b.lon}`} position={[b.lat, b.lon]}>
+        {buses.map((b, i) => (
+          <Marker key={i} position={[b.lat, b.lon]}>
             <Popup>
-              <div style={{ fontSize: 12, lineHeight: 1.35 }}>
-                <div><b>Vehicle:</b> {b.vehicleId || "—"}</div>
-                <div><b>Route:</b> {b.routeId || "—"}</div>
-                <div><b>Trip:</b> {b.tripId || "—"}</div>
-                <div>
-                  <b>Updated:</b>{" "}
-                  {b.timestamp ? new Date(b.timestamp * 1000).toLocaleTimeString() : "—"}
-                </div>
-                <div><b>Bearing:</b> {b.bearing ?? "—"}</div>
-                <div><b>Speed:</b> {b.speed ?? "—"}</div>
-              </div>
+              <b>Route:</b> {b.routeId || "—"}<br/>
+              <b>Vehicle:</b> {b.vehicleId || "—"}
             </Popup>
           </Marker>
         ))}
       </MapContainer>
-    </div>
+    </>
   );
 }

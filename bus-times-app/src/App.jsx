@@ -13,11 +13,11 @@ export default function App() {
 
   async function loadNext(atco) {
     try {
-      const res = await fetch(
-        `http://localhost:3001/api/next?atco=${encodeURIComponent(atco)}`
-      );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+const res = await fetch(
+  `http://localhost:3001/api/vix-next?stopRef=${encodeURIComponent(atco)}&mode=departures`
+);
+const json = await res.json();
+setDepartures(Array.isArray(json.rows) ? json.rows : []);
 
       setDepartures(Array.isArray(json) ? json : []);
     } catch (err) {
