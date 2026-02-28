@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import LiveBusMap from "./LiveBusMap";
 import StopLedBoard from "./StopLedBoard";
@@ -13,15 +13,18 @@ export default function App() {
 
   async function loadNext(atco) {
     try {
-const res = await fetch(
-  `http://localhost:3001/api/vix-next?stopRef=${encodeURIComponent(atco)}&mode=departures`
-);
-const json = await res.json();
-setDepartures(Array.isArray(json.rows) ? json.rows : []);
+      const res = await fetch(
+        `http://localhost:3001/api/next?atco=${encodeURIComponent(atco)}`
+      );
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
 
       setDepartures(Array.isArray(json) ? json : []);
     } catch (err) {
-      console.error("Next API failed:", err);
+      console.error(err);
       setDepartures([]);
     }
   }
@@ -33,8 +36,12 @@ setDepartures(Array.isArray(json.rows) ? json.rows : []);
     }
 
     loadNext(selectedStop.atcoCode);
-    const t = setInterval(() => loadNext(selectedStop.atcoCode), 15000);
-    return () => clearInterval(t);
+
+    const interval = setInterval(() => {
+      loadNext(selectedStop.atcoCode);
+    }, 15000);
+
+    return () => clearInterval(interval);
   }, [selectedStop]);
 
   async function loadStops(q) {
@@ -47,11 +54,15 @@ setDepartures(Array.isArray(json.rows) ? json.rows : []);
     try {
       setLoading(true);
       setError("");
+
+      // ✅ Only return stops that exist in GTFS timetable
       const res = await fetch(
-        `http://localhost:3001/api/stops?q=${encodeURIComponent(q)}`
+        `http://localhost:3001/api/stops?q=${encodeURIComponent(q)}&timetabled=1`
       );
+
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
       setStops(Array.isArray(json) ? json : []);
     } catch (e) {
       setError(e?.message || "Failed to load stops");
@@ -78,10 +89,12 @@ setDepartures(Array.isArray(json.rows) ? json.rows : []);
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search a stop (e.g. Queensgate...)"
-              onKeyDown={(e) => e.key === "Enter" && loadStops(query)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") loadStops(query);
+              }}
             />
-            <button className="btn" onClick={() => loadStops(query)} disabled={loading}>
-              {loading ? "Loading…" : "Search"}
+            <button className="btn" onClick={() => loadStops(query)}>
+              Search
             </button>
           </div>
 
@@ -98,38 +111,46 @@ setDepartures(Array.isArray(json.rows) ? json.rows : []);
           )}
 
           <div style={{ marginTop: 16 }}>
-            <div className="sectionTitle">Results</div>
+            <div className="sectionTitle">
+              Results{" "}
+              <span className="muted">
+                {stops.length ? `(${stops.length})` : ""} • click a stop to select
+              </span>
+            </div>
 
             <div className="list">
-              {stops.slice(0, 50).map((s) => (
-                <button
-                  key={s.atcoCode}
-                  className="listItem"
-                  onClick={() => setSelectedStop(s)}
-                  style={{
-                    background:
-                      selectedStop?.atcoCode === s.atcoCode
+              {stops.slice(0, 50).map((s) => {
+                const isSelected = selectedStop?.atcoCode === s.atcoCode;
+                return (
+                  <button
+                    key={s.atcoCode}
+                    className="listItem"
+                    onClick={() => setSelectedStop(s)}
+                    style={{
+                      background: isSelected
                         ? "rgba(255,255,255,0.08)"
                         : "transparent",
-                  }}
-                >
-                  <div className="stopName">
-                    {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
-                  </div>
-                  <div className="stopMeta">
-                    {s.localityName} • {s.atcoCode}
-                  </div>
-                </button>
-              ))}
+                    }}
+                  >
+                    <div className="stopName">
+                      {s.commonName} {s.indicator ? `(${s.indicator})` : ""}
+                    </div>
+                    <div className="stopMeta">
+                      {s.localityName} • {s.atcoCode}
+                      {isSelected ? " • selected" : ""}
+                    </div>
+                  </button>
+                );
+              })}
 
               {!loading && !error && stops.length === 0 && (
                 <div className="empty">No stops yet — try a search.</div>
               )}
             </div>
 
-            {selectedStop && (
+            {selectedStop ? (
               <StopLedBoard stop={selectedStop} departures={departures} />
-            )}
+            ) : null}
           </div>
         </section>
 
