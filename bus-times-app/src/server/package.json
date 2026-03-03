@@ -1,19 +1,20 @@
 {
-  "name": "server",
+  "name": "bus-times-client",
+  "private": true,
   "version": "1.0.0",
-  "main": "index.js",
-  "dependencies": {
-    "better-sqlite3": "^12.6.2",
-    "cheerio": "^1.2.0",
-    "cors": "^2.8.6",
-    "csv-parse": "^6.1.0",
-    "dotenv": "^17.3.1",
-    "express": "^4.22.1",
-    "fast-xml-parser": "^5.4.1",
-    "gtfs-realtime-bindings": "^1.1.1",
-    "node-fetch": "^3.0.0"
-  },
   "scripts": {
-    "start": "node index.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^7.3.1"
   }
 }

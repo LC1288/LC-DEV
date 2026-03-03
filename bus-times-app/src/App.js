@@ -1,84 +1,184 @@
-import React, { useEffect, useState } from "react";
-import { SafeAreaView, Text, View, ActivityIndicator } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import React, { useEffect, useMemo, useState } from "react";
+import { SafeAreaView, View, Text, TextInput, FlatList, Pressable, ActivityIndicator, Platform } from "react-native";
 
-const API_BASE = "http://10.0.2.2:3001"; 
-// Android emulator -> your PC localhost
-// If using a real phone on same Wi-Fi, use: http://YOUR_PC_IP:3001
+const API_BASE =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:3001" // Android emulator talks to your PC localhost via 10.0.2.2
+    : "http://localhost:3001"; // iOS simulator + web
 
 export default function App() {
-  const [stops, setStops] = useState([]);
-  const [vehicles, setVehicles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [error, setError] = useState("");
 
-  async function fetchStops() {
-    const r = await fetch(`${API_BASE}/api/stops?limit=500`);
-    const data = await r.json();
-    setStops(Array.isArray(data) ? data : data.stops || []);
-  }
-
-  async function fetchVehicles() {
-    const r = await fetch(`${API_BASE}/api/vehicles`);
-    const data = await r.json();
-    setVehicles(Array.isArray(data) ? data : data.vehicles || []);
-  }
+  // Debounce typing so it doesn’t spam requests
+  const debouncedQuery = useDebounce(query, 250);
 
   useEffect(() => {
-    (async () => {
+    const q = debouncedQuery.trim();
+
+    // If empty, show nothing (or you could show top stops)
+    if (!q) {
+      setItems([]);
+      setError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function load() {
       try {
-        await fetchStops();
-        await fetchVehicles();
+        setLoading(true);
+        setError("");
+
+        const res = await fetch(`${API_BASE}/api/stops?q=${encodeURIComponent(q)}&limit=25`);
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data?.error || `Request failed (${res.status})`);
+        }
+
+        if (!cancelled) setItems(data.items || []);
+      } catch (e) {
+        if (!cancelled) setError(String(e.message || e));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    })();
+    }
 
-    const id = setInterval(fetchVehicles, 7000); // poll live buses
-    return () => clearInterval(id);
-  }, []);
+    load();
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8 }}>Loading…</Text>
-      </SafeAreaView>
-    );
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery]);
 
-  // Center Peterborough-ish by default (tweak later)
-  const initialRegion = {
-    latitude: 52.573,
-    longitude: -0.247,
-    latitudeDelta: 0.12,
-    longitudeDelta: 0.12,
-  };
+  const placeholder = useMemo(
+    () => "Search stop name, ATCO code, locality…",
+    []
+  );
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <MapView style={{ flex: 1 }} initialRegion={initialRegion}>
-        {stops.map((s) => (
-          <Marker
-            key={s.atcoCode || s.naptanCode || s.id || `${s.lat},${s.lon}`}
-            coordinate={{ latitude: Number(s.lat), longitude: Number(s.lon) }}
-            title={s.commonName || s.name || "Stop"}
-            description={s.atcoCode || s.naptanCode || ""}
-          />
-        ))}
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0b0f14" }}>
+      <View style={{ padding: 16 }}>
+        <Text style={{ color: "white", fontSize: 22, fontWeight: "700" }}>
+          Bus Stops
+        </Text>
+        <Text style={{ color: "#9aa4b2", marginTop: 6 }}>
+          Type to search (e.g. “Station”, “Queensgate”, ATCO code…)
+        </Text>
 
-        {vehicles.map((v, idx) => (
-          <Marker
-            key={v.vehicleRef || v.id || idx}
-            coordinate={{ latitude: Number(v.lat), longitude: Number(v.lon) }}
-            title={v.lineRef ? `Line ${v.lineRef}` : "Bus"}
-            description={v.destinationName || v.operatorRef || ""}
+        <View
+          style={{
+            marginTop: 14,
+            borderRadius: 12,
+            backgroundColor: "#121926",
+            borderWidth: 1,
+            borderColor: "#1f2a3a",
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={placeholder}
+            placeholderTextColor="#6b7686"
+            style={{ color: "white", fontSize: 16 }}
+            autoCorrect={false}
+            autoCapitalize="none"
           />
-        ))}
-      </MapView>
+        </View>
 
-      <View style={{ position: "absolute", top: 12, left: 12, right: 12, padding: 10, backgroundColor: "white", borderRadius: 12 }}>
-        <Text>Stops: {stops.length} • Live buses: {vehicles.length}</Text>
+        {!!error && (
+          <Text style={{ color: "#ff6b6b", marginTop: 10 }}>
+            {error}
+          </Text>
+        )}
+
+        {loading && (
+          <View style={{ marginTop: 12 }}>
+            <ActivityIndicator />
+          </View>
+        )}
+
+        {!!selected && (
+          <View
+            style={{
+              marginTop: 14,
+              padding: 12,
+              borderRadius: 12,
+              backgroundColor: "#0f1724",
+              borderWidth: 1,
+              borderColor: "#1f2a3a",
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 16, fontWeight: "700" }}>
+              Selected stop
+            </Text>
+            <Text style={{ color: "#cbd5e1", marginTop: 6 }}>
+              {selected.name}
+            </Text>
+            <Text style={{ color: "#9aa4b2", marginTop: 4 }}>
+              {selected.id} • {selected.locality || "Unknown locality"}
+            </Text>
+          </View>
+        )}
       </View>
+
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+        ListEmptyComponent={
+          query.trim() ? (
+            <Text style={{ color: "#9aa4b2", paddingHorizontal: 16 }}>
+              No stops found.
+            </Text>
+          ) : (
+            <Text style={{ color: "#9aa4b2", paddingHorizontal: 16 }}>
+              Start typing to search for stops.
+            </Text>
+          )
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => setSelected(item)}
+            style={{
+              padding: 12,
+              borderRadius: 14,
+              backgroundColor: "#121926",
+              borderWidth: 1,
+              borderColor: "#1f2a3a",
+              marginBottom: 10,
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 16, fontWeight: "700" }}>
+              {item.name}
+            </Text>
+
+            <Text style={{ color: "#9aa4b2", marginTop: 4 }}>
+              {item.id}
+              {item.indicator ? ` • ${item.indicator}` : ""}
+              {item.locality ? ` • ${item.locality}` : ""}
+            </Text>
+          </Pressable>
+        )}
+      />
     </SafeAreaView>
   );
+}
+
+// Simple debounce hook
+function useDebounce(value, delayMs) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+
+  return debounced;
 }
