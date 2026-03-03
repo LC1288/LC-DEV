@@ -110,7 +110,7 @@ body {
 
 .mapWrap { margin-top: 12px; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
 
-/* Buttons for reset/clear */
+/* Buttons */
 .smallBtn{
   border-radius: 14px;
   border: 1px solid var(--border);
@@ -127,3 +127,9 @@ body {
 .smallBtn:hover:enabled{
   border-color: #2d3f5a;
 }
+
+/* Force readable results text (was rendering too dark on some setups) */
+.resultItem { color: #ffffff; }
+.resultTitle { color: #ffffff; }
+.resultMeta { color: #b8c2cf; }
+.resultItem:disabled { color: #ffffff; }
