@@ -39,6 +39,17 @@ function isUkLatLon(lat, lon) {
   return lat >= 49 && lat <= 61 && lon >= -9 && lon <= 3;
 }
 
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Non-JSON response (${res.status}). First 140 chars:\n${text.slice(0, 140)}`
+    );
+  }
+}
+
 export default function App() {
   const PB = useMemo(() => ({ lat: 52.5726, lon: -0.2427 }), []);
 
@@ -63,7 +74,7 @@ export default function App() {
 
   const mapRef = useRef(null);
 
-  // --- stop search ---
+  // --- stop search (backend: GET /api/stops?q=... -> { ok, stops:[{stop_id, stop_name, lat, lon}] }) ---
   useEffect(() => {
     const q = debounced.trim();
     if (!q) {
@@ -78,10 +89,23 @@ export default function App() {
       try {
         setStopLoading(true);
         setStopError("");
+
         const r = await fetch(`/api/stops?q=${encodeURIComponent(q)}&limit=50`);
-        const data = await r.json();
+        const data = await safeJson(r);
+
         if (!r.ok || !data.ok) throw new Error(data?.error || `Stops failed (${r.status})`);
-        if (!cancelled) setStops(data.items || []);
+
+        const list = Array.isArray(data.stops) ? data.stops : [];
+        const mapped = list.map((s) => ({
+          id: s.stop_id,
+          name: s.stop_name,
+          lat: Number(s.lat),
+          lon: Number(s.lon),
+          locality: "",
+          indicator: "",
+        }));
+
+        if (!cancelled) setStops(mapped);
       } catch (e) {
         if (!cancelled) setStopError(String(e.message || e));
       } finally {
@@ -94,9 +118,9 @@ export default function App() {
     };
   }, [debounced]);
 
-  // --- departures for selected stop ---
+  // --- departures for selected stop (backend: GET /api/departures?lat=...&lon=... -> { stop, departures:[...] }) ---
   useEffect(() => {
-    if (!selected?.id) {
+    if (!selected?.lat || !selected?.lon) {
       setDepartures([]);
       setDepsError("");
       return;
@@ -108,10 +132,15 @@ export default function App() {
       try {
         setDepsLoading(true);
         setDepsError("");
-        const r = await fetch(`/api/departures?stopId=${encodeURIComponent(selected.id)}&limit=12`);
-        const data = await r.json();
-        if (!r.ok || !data.ok) throw new Error(data?.error || `Departures failed (${r.status})`);
-        if (!cancelled) setDepartures(data.items || []);
+
+        const r = await fetch(
+          `/api/departures?lat=${encodeURIComponent(selected.lat)}&lon=${encodeURIComponent(selected.lon)}`
+        );
+        const data = await safeJson(r);
+
+        if (!r.ok) throw new Error(data?.error || `Departures failed (${r.status})`);
+
+        if (!cancelled) setDepartures(Array.isArray(data.departures) ? data.departures : []);
       } catch (e) {
         if (!cancelled) setDepsError(String(e.message || e));
       } finally {
@@ -122,28 +151,47 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selected?.id]);
+  }, [selected?.lat, selected?.lon]);
 
-  // --- live buses poll ---
+  // --- live vehicles poll (backend: GET /api/vehicles?lat=..&lon=..&radius_km=.. -> { ok, vehicles:[...] }) ---
   useEffect(() => {
     let cancelled = false;
 
-    async function loadBuses() {
+    async function loadVehicles() {
       try {
         setBusLoading(true);
         setBusError("");
-        const r = await fetch(`/api/live-buses`);
-        const data = await r.json();
-        if (!r.ok || !data.ok) throw new Error(data?.error || `Live buses failed (${r.status})`);
+
+        const r = await fetch(
+          `/api/vehicles?lat=${encodeURIComponent(PB.lat)}&lon=${encodeURIComponent(
+            PB.lon
+          )}&radius_km=15&limit=250`
+        );
+        const data = await safeJson(r);
+
+        if (!r.ok || !data.ok) throw new Error(data?.error || `Vehicles failed (${r.status})`);
 
         if (!cancelled) {
-          const nextBuses = data.items || [];
-          setBuses(nextBuses);
+          const nextVehicles = Array.isArray(data.vehicles) ? data.vehicles : [];
+
+          // map backend vehicles -> UI "buses"
+          const mapped = nextVehicles.map((v) => ({
+            id: v.vehicleId || `${v.lat},${v.lon}`,
+            lat: v.lat,
+            lon: v.lon,
+            line: v.routeId || "—",
+            destination: v.tripId || "",
+            recordedAtTime: v.timestamp
+              ? new Date(v.timestamp * 1000).toLocaleTimeString()
+              : "—",
+          }));
+
+          setBuses(mapped);
 
           const prev = trackRef.current;
           const updated = { ...prev };
 
-          for (const b of nextBuses) {
+          for (const b of mapped) {
             const id = b.id;
             const point = [b.lat, b.lon];
             if (!updated[id]) updated[id] = [];
@@ -157,7 +205,7 @@ export default function App() {
             if (moved) updated[id] = [...updated[id], point].slice(-25);
           }
 
-          const liveIds = new Set(nextBuses.map((b) => b.id));
+          const liveIds = new Set(mapped.map((b) => b.id));
           for (const id of Object.keys(updated)) {
             if (!liveIds.has(id)) delete updated[id];
           }
@@ -172,13 +220,13 @@ export default function App() {
       }
     }
 
-    loadBuses();
-    const t = setInterval(loadBuses, 10000);
+    loadVehicles();
+    const t = setInterval(loadVehicles, 10000);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, []);
+  }, [PB.lat, PB.lon]);
 
   // --- map filtering (map is an ADD-ON) ---
   const radiusKmSelected = 1.5;
@@ -230,7 +278,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* SEARCH + DEPARTURES (main feature) */}
+        {/* SEARCH + DEPARTURES */}
         <section className="card">
           <div className="field">
             <label>Search bus stop</label>
@@ -251,7 +299,9 @@ export default function App() {
               </button>
             </div>
 
-            <div className="hint">Tip: search by <b>stop name</b>, <b>locality</b>, or <b>ATCO code</b>.</div>
+            <div className="hint">
+              Tip: search by <b>stop name</b>.
+            </div>
           </div>
 
           <div className="resultsHead">
@@ -274,11 +324,7 @@ export default function App() {
                   onClick={() => selectStop(s)}
                 >
                   <div className="resultTitle">{s.name}</div>
-                  <div className="resultMeta">
-                    {s.id}
-                    {s.indicator ? ` • ${s.indicator}` : ""}
-                    {s.locality ? ` • ${s.locality}` : ""}
-                  </div>
+                  <div className="resultMeta">{s.id}</div>
                 </button>
               ))
             )}
@@ -289,10 +335,10 @@ export default function App() {
             <div className="selectedCard">
               <div className="selectedTitle">Selected stop</div>
               <div className="selectedName">{selected.name}</div>
-              <div className="selectedMeta">{selected.id} • {selected.locality || "Unknown locality"}</div>
+              <div className="selectedMeta">{selected.id}</div>
 
               <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ fontWeight: 800 }}>Next departures</div>
+                <div style={{ fontWeight: 800 }}>Next 5 buses</div>
                 {depsLoading ? <span className="pill">Loading…</span> : <span className="pill">Today</span>}
               </div>
 
@@ -300,7 +346,7 @@ export default function App() {
 
               {!depsLoading && departures.length === 0 && !depsError ? (
                 <div className="empty" style={{ marginTop: 10 }}>
-                  No departures found for this stop (GTFS may not match this stop id).
+                  No departures found.
                 </div>
               ) : null}
 
@@ -308,7 +354,7 @@ export default function App() {
                 <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
                   {departures.map((d, idx) => (
                     <div
-                      key={`${d.trip_id}-${idx}`}
+                      key={`${d.route}-${d.destination}-${idx}`}
                       style={{
                         border: "1px solid var(--border)",
                         borderRadius: 14,
@@ -317,13 +363,11 @@ export default function App() {
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                        <div style={{ fontWeight: 850 }}>
-                          {d.route_short_name || "Route"} {d.route_long_name ? `• ${d.route_long_name}` : ""}
-                        </div>
-                        <div style={{ fontWeight: 850 }}>{d.departure_time?.slice(0, 5)}</div>
+                        <div style={{ fontWeight: 850 }}>{d.route || "—"}</div>
+                        <div style={{ fontWeight: 850 }}>{d.expected || d.scheduled_time || "—"}</div>
                       </div>
                       <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 13 }}>
-                        {d.headsign ? `To: ${d.headsign}` : "Destination: —"}
+                        {d.destination ? `To: ${d.destination}` : "Destination: —"} • {d.mins || "—"}
                       </div>
                     </div>
                   ))}
@@ -394,7 +438,7 @@ export default function App() {
                   <Popup>
                     <b>Line:</b> {b.line}
                     <br />
-                    <b>Destination:</b> {b.destination || "—"}
+                    <b>Trip:</b> {b.destination || "—"}
                     <br />
                     <b>Recorded:</b> {b.recordedAtTime || "—"}
                   </Popup>

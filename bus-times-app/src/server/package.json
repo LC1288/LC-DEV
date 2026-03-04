@@ -1,16 +1,19 @@
 {
   "name": "bus-times-server",
   "version": "1.0.0",
-  "main": "index.js",
   "type": "commonjs",
+  "main": "src/index.js",
   "scripts": {
-    "dev": "node index.js"
+    "import:gtfs": "node src/import_gtfs.js",
+    "dev": "node src/index.js"
   },
   "dependencies": {
+    "better-sqlite3": "^11.5.0",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^5.4.2",
+    "gtfs-realtime-bindings": "^1.1.1"
   }
 }
